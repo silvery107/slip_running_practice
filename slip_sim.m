@@ -6,7 +6,7 @@ p = struct();
 p.m = 1.;
 p.g = 9.81;
 p.l0 = 0.8; % Spring rest length
-p.ks = 200; % Spring constant
+p.ks = 500; % Spring constant
 p.Ts = 0.2; % Stance duration
 p.max_phase_dt = 1; % Maximum phase duration
 p.plot = false;
@@ -48,7 +48,7 @@ for ii=1:num_jump
         case 1 % Raibert heuristic
             pfx_err = dpc(1) * p.Ts / 2 + k_raibert * (dpc(1) - vx_des);
             u = asin(max(min(pfx_err, p.l0), -p.l0) / p.l0);
-        case 2 % Linear deadbeat
+        case 2 % Linear deadbeat gait library
             vx_tgt = min(x_apex(2)+0.1, vx_des);
             gait = gait_library(vx_tgt);
             u = gait.u_star + gait.K * (x_apex - gait.x_star);
@@ -136,7 +136,7 @@ function x_apex_next = apex_to_apex_map(x_apex, u, p)
     pf0 = pc0 + rot_mat(u) * [0; -p.l0];
     x0 = [pc0; dpc0; pf0]; 
     [~, x_next] = simulate(0, x0, p);
-    x_apex_next = [x_next(2); x_next(3)];
+    x_apex_next = x_next(2:3);
 end
 
 function [t0, x] = simulate(t0, x, p)
@@ -144,13 +144,14 @@ function [t0, x] = simulate(t0, x, p)
 
     % Simulate flight phase from apex
     tf = t0 + p.max_phase_dt;
-    options = odeset("Events", @(t, x)event_td(t, x, p));
-    sol = ode45(@(t, x)dynamics_flight(t, x, p), [t0, tf], x, options);
+    options = odeset("Events", @(t, x)event_td(x, p));
+    sol = ode45(@(t, x)dynamics_flight(x, p), [t0, tf], x, options);
     t0 = sol.x(end);
     x = sol.y(:, end);
 
     for idx=1:length(sol.x)
-        plot_robot(sol.y(:, idx), p);
+        dt = sol.x(min(idx+1, length(sol.x))) - sol.x(idx);
+        plot_robot(sol.y(:, idx), dt, p);
     end
     if x(6) < -1e-5 || x(2) < -1e-5
         return;
@@ -158,37 +159,39 @@ function [t0, x] = simulate(t0, x, p)
     
     % Simulate stance phase
     tf = t0 + p.max_phase_dt;
-    options = odeset("Events", @(t, x)event_lo(t, x, p));
-    sol = ode45(@(t, x)dynamics_stance(t, x, p), [t0, tf], x, options);
+    options = odeset("Events", @(t, x)event_lo(x, p));
+    sol = ode45(@(t, x)dynamics_stance(x, p), [t0, tf], x, options);
     t0 = sol.x(end);
     x = sol.y(:, end);
 
     for idx=1:length(sol.x)
-        plot_robot(sol.y(:, idx), p);
+        dt = sol.x(min(idx+1, length(sol.x))) - sol.x(idx);
+        plot_robot(sol.y(:, idx), dt, p);
     end
     % Update stance duration
     p.Ts = sol.x(end) - sol.x(1);
 
     % Simulate flight phase to apex
     tf = t0 + p.max_phase_dt;
-    options = odeset("Events", @(t, x)event_apex(t, x, p));
-    sol = ode45(@(t, x)dynamics_flight(t, x, p), [t0, tf], x, options);
+    options = odeset("Events", @(t, x)event_apex(x, p));
+    sol = ode45(@(t, x)dynamics_flight(x, p), [t0, tf], x, options);
     t0 = sol.x(end);
     x = sol.y(:, end);
 
     for idx=1:length(sol.x)
-        plot_robot(sol.y(:, idx), p);
+        dt = sol.x(min(idx+1, length(sol.x))) - sol.x(idx);
+        plot_robot(sol.y(:, idx), dt, p);
     end
 end
 
-function [value, isterminal, direction] = event_td(t, x, p)
+function [value, isterminal, direction] = event_td(x, p)
     pf = x(5:6);
     value = pf(2);
     isterminal = 1;
     direction = -1;
 end
 
-function [value, isterminal, direction] = event_lo(t, x, p)
+function [value, isterminal, direction] = event_lo(x, p)
     pc = x(1:2);
     pf = x(5:6);
     l = pc - pf;
@@ -197,21 +200,21 @@ function [value, isterminal, direction] = event_lo(t, x, p)
     direction = 1;
 end
 
-function [value, isterminal, direction] = event_apex(t, x, p)
+function [value, isterminal, direction] = event_apex(x, p)
     dpc = x(3:4);
     value = dpc(2);
     isterminal = 1;
     direction = -1;
 end
 
-function dxdt = dynamics_flight(t, x, p)
+function dxdt = dynamics_flight(x, p)
     dpc = x(3:4);
     ddp = [0; -p.g];
     dpf = dpc;
     dxdt = [dpc; ddp; dpf];
 end
 
-function dxdt = dynamics_stance(t, x, p)
+function dxdt = dynamics_stance(x, p)
     pc = x(1:2);
     dpc = x(3:4);
     pf = x(5:6);
@@ -226,7 +229,7 @@ function dxdt = dynamics_stance(t, x, p)
     dxdt = [dpc; ddp; dpf];
 end
 
-function plot_robot(x, p)
+function plot_robot(x, dt, p)
     % TODO better visualization
     if ~p.plot
         return;
@@ -241,7 +244,7 @@ function plot_robot(x, p)
     ylim([-0.5, 2]);
     % xlim([-0.5, 5]);
     text(pc(1), pc(2)+0.3, "v_x = "+string(x(3)))
-    pause(0.05);
+    pause(dt);
     % exportgraphics(p.fig, "my_slip.gif", "Append", true);
 end
 
