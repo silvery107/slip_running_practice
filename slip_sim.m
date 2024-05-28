@@ -1,51 +1,57 @@
 clc; clear; close all;
 import casadi.*
 
+% Robot parameters
 p = struct();
-p.mass = 1.;
-p.l0 = 0.9;
-p.ks = 200;
+p.m = 1.;
 p.g = 9.81;
-p.kr = 0.1;
-p.vx_des = 1.;
-p.num_jump = 5;
-p.max_phase_dt = 1;
-p.Ts = 0.2;
-p.ctrl_flag = 2;
+p.l0 = 0.8; % Spring rest length
+p.ks = 200; % Spring constant
+p.Ts = 0.2; % Stance duration
+p.max_phase_dt = 1; % Maximum phase duration
 p.plot = false;
 
-[x_apex_star, u_star] = find_periodic_gait(p.vx_des, p)
-K = calc_feedback_gain(x_apex_star, u_star, p)
+% Global parameters
+k_raibert = 0.1;
+ctrl_flag = 2;
+num_jump = 10;
+vx_des = 2.;
 
-u0 = u_star;
-pc0 = [0; x_apex_star(1)];
-dpc0 = [p.vx_des; 0];
+% Initial state and control
+u0 = 0;
+pc0 = [0; 1.3];
+dpc0 = [0; 0];
 pf0 = pc0 + rot_mat(u0) * [0; -p.l0];
 x0 = [pc0; dpc0; pf0]; 
 t0 = 0;
 % x: [pc_x, pc_z, dpc_x, dpc_z, pf_x, pf_z]
 % u: [th] % TODO include Ks as control?
 
+% Build gait library
+gait_library = build_gait_library(0, 3, 0.1, p);
+
 p.plot = true;
 p.fig = figure();
 % exportgraphics(p.fig, "my_slip.gif", "Append", false);
 
-x = x0;
-t = t0;
-u = u0;
 %% Main loop
-for ii=1:p.num_jump
+x = x0;
+u = u0;
+t = t0;
+for ii=1:num_jump
     % Unpack states
     pc = x(1:2);
     dpc = x(3:4);
     x_apex = x(2:3);
     % Calculate control input
-    switch p.ctrl_flag
+    switch ctrl_flag
         case 1 % Raibert heuristic
-            pfx_err = dpc(1) * p.Ts / 2 + p.kr * (dpc(1) - p.vx_des);
+            pfx_err = dpc(1) * p.Ts / 2 + k_raibert * (dpc(1) - vx_des);
             u = asin(max(min(pfx_err, p.l0), -p.l0) / p.l0);
         case 2 % Linear deadbeat
-            u = u_star + K * (x_apex - x_apex_star);
+            vx_tgt = min(x_apex(2)+0.1, vx_des);
+            gait = gait_library(vx_tgt);
+            u = gait.u_star + gait.K * (x_apex - gait.x_star);
         case 3 % Open loop
             u = u_star;
     end
@@ -61,8 +67,18 @@ for ii=1:p.num_jump
 end
 
 %% Functions
-function build_gait_library(p)
-    % TODO build a search tree and map x_apex to (K, x*, u*) tuple
+function gait_library = build_gait_library(v_lb, v_ub, v_delta, p)
+    % Build gait library maps vx to (K, x*, u*)
+    keys = v_lb:v_delta:v_ub;
+    values = [];
+    for vx=keys
+        [x_star, u_star] = find_periodic_gait(vx, p);
+        K = calc_feedback_gain(x_star, u_star, p);
+        gait = struct('K', K, 'x_star', x_star, 'u_star', u_star);
+        values = [values, gait];
+    end
+    gait_dict = dictionary(string(keys), values);
+    gait_library = @(vx) gait_dict(string(round(vx, 1)));
 end
 
 function K = calc_feedback_gain(x_star, u_star, p)
@@ -205,12 +221,13 @@ function dxdt = dynamics_stance(t, x, p)
     if l_norm > p.l0
         l_dir = l_dir.*0;
     end
-    ddp = p.ks * (p.l0 - l_norm) * l_dir / p.mass + [0; -p.g];
+    ddp = p.ks * (p.l0 - l_norm) * l_dir / p.m + [0; -p.g];
     dpf = [0; 0];
     dxdt = [dpc; ddp; dpf];
 end
 
 function plot_robot(x, p)
+    % TODO better visualization
     if ~p.plot
         return;
     end
@@ -222,8 +239,8 @@ function plot_robot(x, p)
     scatter(pc(1), pc(2), 1000, 'r', LineWidth=3);
     plot([pc(1); pf(1)], [pc(2); pf(2)], 'k', LineWidth=2);
     ylim([-0.5, 2]);
-    xlim([-0.5, 5]);
-    text(0, 1.5, "v_x = "+string(x(3)))
+    % xlim([-0.5, 5]);
+    text(pc(1), pc(2)+0.3, "v_x = "+string(x(3)))
     pause(0.05);
     % exportgraphics(p.fig, "my_slip.gif", "Append", true);
 end
