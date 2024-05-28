@@ -94,25 +94,25 @@ function K = calc_feedback_gain(x_star, u_star, p)
     dim_u = length(u_star);
 
     Jx = zeros(dim_x, dim_x);
-    for idx=1:size(Jx, 2)
+    for idx=1:dim_x
         x_perturb = x_star;
         x_perturb(idx) = x_star(idx) - epsilon;
         x_prev = apex_to_apex_map(x_perturb, u_star, p);
         x_perturb = x_star;
         x_perturb(idx) = x_star(idx) + epsilon;
         x_next = apex_to_apex_map(x_perturb, u_star, p);
-        Jx(:, idx) = (x_next - x_prev) / 2*epsilon;
+        Jx(:, idx) = (x_next - x_prev) / (2*epsilon);
     end
 
     Ju = zeros(dim_x, dim_u);
-    for idx=1:size(Ju, 2)
+    for idx=1:dim_u
         u_perturb = u_star;
         u_perturb(idx) = u_star(idx) - epsilon;
         x_prev = apex_to_apex_map(x_star, u_perturb, p);
         u_perturb = u_star;
         u_perturb(idx) = u_star(idx) + epsilon;
         x_next = apex_to_apex_map(x_star, u_perturb, p);
-        Ju(:, idx) = (x_next - x_prev) / 2*epsilon;
+        Ju(:, idx) = (x_next - x_prev) / (2*epsilon);
     end
 
     K = -Ju\Jx;
