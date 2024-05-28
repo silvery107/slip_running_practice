@@ -5,8 +5,10 @@ import casadi.*
 p = struct();
 p.m = 1.;
 p.g = 9.81;
-p.l0 = 0.8; % Spring rest length
 p.ks = 500; % Spring constant
+p.l0 = 0.8; % Spring rest length
+p.l1 = 0.5; % Hopper link 1 length
+p.l2 = 0.5; % Hopper link 2 length
 p.Ts = 0.2; % Stance duration
 p.max_phase_dt = 1; % Maximum phase duration
 p.plot = false;
@@ -15,12 +17,12 @@ p.plot = false;
 k_raibert = 0.1;
 ctrl_flag = 2;
 num_jump = 10;
-vx_des = 2.;
+vx_des = 3.;
 
 % Initial state and control
 u0 = 0;
 pc0 = [0; 1.3];
-dpc0 = [0; 0];
+dpc0 = [1; 0];
 pf0 = pc0 + rot_mat(u0) * [0; -p.l0];
 x0 = [pc0; dpc0; pf0]; 
 t0 = 0;
@@ -32,9 +34,11 @@ gait_library = build_gait_library(0, 3, 0.1, p);
 
 p.plot = true;
 p.fig = figure();
-% exportgraphics(p.fig, "my_slip.gif", "Append", false);
+% exportgraphics(p.fig, "slip_demo.gif", "Append", false);
 
 %% Main loop
+clf;
+p = init_renderer(x0, p);
 x = x0;
 u = u0;
 t = t0;
@@ -52,6 +56,8 @@ for ii=1:num_jump
             vx_tgt = min(x_apex(2)+0.1, vx_des);
             gait = gait_library(vx_tgt);
             u = gait.u_star + gait.K * (x_apex - gait.x_star);
+            p.t_vx_des.String = "v_{x,d} = "+ string(round(vx_tgt, 1));
+            drawnow
         case 3 % Open loop
             u = u_star;
     end
@@ -113,8 +119,9 @@ function K = calc_feedback_gain(x_star, u_star, p)
 end
 
 function [x_star, u_star] = find_periodic_gait(vx, p)
+    options = optimoptions('lsqnonlin', 'Display', 'off');
     var_init = [1; 0]; % opt var: pc_z, u
-    var = lsqnonlin(@(var)min_apex_map(var, vx, p), var_init);
+    var = lsqnonlin(@(var)min_apex_map(var, vx, p), var_init, [], [], options);
     x_star = [var(1); vx];
     u_star = var(2);
 end
@@ -229,23 +236,63 @@ function dxdt = dynamics_stance(x, p)
     dxdt = [dpc; ddp; dpf];
 end
 
+function p = init_renderer(x0, p)
+    % Axis
+    hold on; grid on; axis equal;
+    % xlim([-0.5, 10]);
+    ylim([-0.5, 2]);
+    xlabel("x (m)");
+    ylabel("z (m)");
+    % Init robot pose
+    pc = x0(1:2);
+    pf = x0(5:6);
+    l0_vec = pf - pc;
+    l0_norm = norm(l0_vec);
+    alpha = acos((p.l2^2 - l0_norm^2 - p.l1^2) / (-2*l0_norm*p.l1));
+    theta = atan2(l0_vec(1), -l0_vec(2));
+    pc_knee = pc + rot_mat(theta - alpha) * [0; -p.l1];
+    % Init plot handlers
+    p.s_com = scatter(pc(1), pc(2), 1000, 'r', LineWidth=4);
+    p.p_thigh = plot([pc(1); pc_knee(1)], [pc(2); pc_knee(2)], 'k', LineWidth=2);
+    p.p_calf = plot([pc_knee(1); pf(1)], [pc_knee(2); pf(2)], 'k', LineWidth=2);
+    % p.p_spring = plot([pc(1); pf(1)], [pc(2); pf(2)], 'k', LineWidth=2);
+    p.p_com_traj = plot(pc(1), pc(2), 'b', 'LineWidth', 2);
+    p.t_vx = text(pc(1)+0.15, 1.3, "v_x = "+string(x0(3)), "FontSize",18);
+    p.t_vx_des = text(pc(1)+0.15, 1.5, "v_{x,d} = "+string(x0(3)), "FontSize",18);
+    yline(0, LineWidth=3);
+    hold off;
+end
+
 function plot_robot(x, dt, p)
-    % TODO better visualization
     if ~p.plot
         return;
     end
-    clf;
-    hold on; grid on; axis equal;
-    yline(0, LineWidth=3)
+    % Retrieve robot pose
     pc = x(1:2);
     pf = x(5:6);
-    scatter(pc(1), pc(2), 1000, 'r', LineWidth=3);
-    plot([pc(1); pf(1)], [pc(2); pf(2)], 'k', LineWidth=2);
-    ylim([-0.5, 2]);
-    % xlim([-0.5, 5]);
-    text(pc(1), pc(2)+0.3, "v_x = "+string(x(3)))
+    l0_vec = pf - pc;
+    l0_norm = norm(l0_vec);
+    alpha = acos((p.l2^2 - l0_norm^2 - p.l1^2) / (-2*l0_norm*p.l1));
+    theta = atan2(l0_vec(1), -l0_vec(2));
+    p_knee = pc + rot_mat(theta - alpha) * [0; -p.l1];
+    % Update plot handlers
+    p.s_com.XData = pc(1);
+    p.s_com.YData = pc(2);
+    p.p_thigh.XData = [pc(1); p_knee(1)];
+    p.p_thigh.YData = [pc(2); p_knee(2)];
+    p.p_calf.XData = [p_knee(1); pf(1)];
+    p.p_calf.YData = [p_knee(2); pf(2)];
+    % p.p_spring.XData = [pc(1); pf(1)];
+    % p.p_spring.YData = [pc(2); pf(2)];
+    p.p_com_traj.XData(end+1) = pc(1);
+    p.p_com_traj.YData(end+1) = pc(2);
+    p.t_vx.Position = [pc(1)+0.15, 1.3];
+    p.t_vx.String = "v_x = "+string(x(3));
+    p.t_vx_des.Position = [pc(1)+0.15, 1.5];
+    % Center robot
+    xlim([pc(1) - 2.25, pc(1) + 1.75]);
     pause(dt);
-    % exportgraphics(p.fig, "my_slip.gif", "Append", true);
+    % exportgraphics(p.fig, "slip_demo.gif", "Append", true);
 end
 
 function R = rot_mat(th)
