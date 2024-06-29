@@ -73,10 +73,8 @@ for ii=1:num_jump
 end
 
 %% Post processing
-th2_0 = pi - acos((p.l0^2 - p.l2^2 - p.l1^2) / (-2*p.l2*p.l1));
 F_log = [];
 tau_log = [];
-delta_th2_log = [];
 for idx=1:length(x_log)
     x = x_log(:, idx);
     pc = x(1:2);
@@ -103,7 +101,6 @@ for idx=1:length(x_log)
     end
     F_log = [F_log, grf];
     tau_log = [tau_log, tau];
-    delta_th2_log = [delta_th2_log, th2 - th2_0];
 
     dt = t_log(min(idx+1, length(t_log))) - t_log(idx);
     plot_robot(x_log(:, idx), dt, p);
@@ -120,17 +117,14 @@ legend();
 
 figure();
 tau_2 = tau_log(2, :);
-designed_ks = 20;
-tau_s = delta_th2_log .* designed_ks;
 
-plot(tau_2, DisplayName="\tau_2", LineWidth=2);
+plot(tau_log(1, :), DisplayName="\tau_1", LineWidth=2);
 hold on; grid on;
-plot(tau_s, DisplayName="\tau_s", LineWidth=2);
-plot(tau_2 - tau_s, DisplayName="\tau_{motor}", LineWidth=2);
+plot(tau_log(2, :), DisplayName="\tau_2", LineWidth=2);
 
-text(0, 50, "Ks_{designed}="+num2str(designed_ks));
 ylabel("Joint Torque (Nm)");
 legend();
+
 %% Functions
 function gait_library = build_gait_library(v_lb, v_ub, v_delta, p)
     % Build gait library maps vx to (K, x*, u*)
@@ -358,7 +352,7 @@ function plot_robot(x, dt, p)
     % Center robot
     xlim([pc(1) - 1.75, pc(1) + 1.5]);
     pause(dt);
-    % exportgraphics(p.fig, "slip_demo.gif", "Append", true);
+    exportgraphics(p.fig, "slip_demo.gif", "Append", true);
 end
 
 function J = jacobian_SLIP(th1, th2, p)
